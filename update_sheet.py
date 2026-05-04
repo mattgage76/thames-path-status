@@ -66,7 +66,7 @@ def fetch_updates_from_claude():
     for attempt in range(10):
         response = client.messages.create(
             model="claude-haiku-4-5",
-            max_tokens=2000,
+            max_tokens=4000,
             system=SYSTEM_PROMPT,
             tools=tools,
             messages=messages,
@@ -74,7 +74,7 @@ def fetch_updates_from_claude():
 
         print(f"  Turn {attempt+1}: stop_reason={response.stop_reason}, blocks={[b.type for b in response.content]}")
 
-        if response.stop_reason == "end_turn":
+        if response.stop_reason in ("end_turn", "max_tokens"):
             text_blocks = [b.text for b in response.content if hasattr(b, "text") and b.text.strip()]
             if text_blocks:
                 full_text = text_blocks[-1].strip()
