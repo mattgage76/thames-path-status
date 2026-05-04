@@ -15,35 +15,42 @@ XLSX_PATH = "PathStatus.xlsx"
 CSV_PATH  = "PathStatus.csv"
 LOG_PATH  = "update_log.txt"
 
-# ── Prompts (kept short to stay within free tier token limits) ────────────────
+# ── Prompts ───────────────────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = f"""You research Thames Path closures and return ONLY a JSON array.
-No markdown, no preamble. Today: {TODAY}.
+No markdown, no preamble, no explanation. Just the raw JSON array starting with [.
+Today: {TODAY}.
 
 Each item must have these exact fields:
-type (closure/construction/incident/info), type2 (diversion/intermittent/open/closure/null),
-title (max 80 chars), description (max 400 chars), mile (float or null),
-status (short string), date (YYYY-MM-DD or null), last_verified ("{TODAY}"),
-source (URL or null), lat (float or null), lon (float or null)"""
+type (closure/construction/incident/info),
+type2 (diversion/intermittent/open/closure/null),
+title (max 80 chars),
+description (max 400 chars),
+mile (float or null),
+status (short string),
+date (YYYY-MM-DD or null),
+last_verified ("{TODAY}"),
+source (URL or null),
+lat (float or null),
+lon (float or null)"""
 
 USER_PROMPT = """Search for current Thames Path closures and diversions.
-Check: nationaltrail.co.uk/thames-path, walkthethames.co.uk/thames-path-status
+Check nationaltrail.co.uk and walkthethames.co.uk/thames-path-status
 
-Known issues to verify (confirm active or mark reopened):
-- Osney Bridge diversion Oxford (mile 53.8)
-- Marsh Lock closure Henley (mile 105.1)
-- Sandford Footbridge closure (mile 57)
-- Abingdon Weir intermittent closure (mile 62)
-- Temple Footbridge long-term closure near Marlow (mile 108.5)
-- Runnymede Bridge 142 closure Egham (mile 136.5)
-- Bell Weir Lock diversion Runnymede (mile 136.2)
-- Streatley-Goring towpath diversion (mile 81.5)
-- Penton Hook Island closure (mile 135.6)
-- Ten Foot Bridge closure Faringdon (mile 34)
-- Brentford Grand Union Canal disruption (mile 154)
+Verify these known issues (confirm still active or mark reopened):
+- Osney Bridge diversion Oxford mile 53.8
+- Marsh Lock closure Henley mile 105.1
+- Sandford Footbridge closure mile 57
+- Abingdon Weir intermittent closure mile 62
+- Temple Footbridge closure near Marlow mile 108.5
+- Runnymede Bridge 142 closure Egham mile 136.5
+- Bell Weir Lock diversion Runnymede mile 136.2
+- Streatley-Goring towpath diversion mile 81.5
+- Penton Hook Island closure mile 135.6
+- Ten Foot Bridge closure Faringdon mile 34
+- Brentford Grand Union Canal disruption mile 154
 
-Also check for any new closures opened in the last 7 days.
-Return ONLY a valid JSON array."""
+Return ONLY a valid JSON array, nothing else."""
 
 # ── Claude API ────────────────────────────────────────────────────────────────
 
@@ -52,41 +59,59 @@ def fetch_updates_from_claude():
     print("Calling Claude API...")
 
     messages = [{"role": "user", "content": USER_PROMPT}]
+    tools = [{"type": "web_search_20250305", "name": "web_search"}]
 
-    response = client.messages.create(
-        model="claude-haiku-4-5",
-        max_tokens=2000,
-        system=SYSTEM_PROMPT,
-        tools=[{"type": "web_search_20250305", "name": "web_search"}],
-        messages=messages,
-    )
-
-    # Handle tool use turns
-    while response.stop_reason == "tool_use":
-        messages.append({"role": "assistant", "content": response.content})
-        tool_results = [
-            {"type": "tool_result", "tool_use_id": b.id, "content": ""}
-            for b in response.content if b.type == "tool_use"
-        ]
-        messages.append({"role": "user", "content": tool_results})
-        time.sleep(2)  # avoid rate limiting between turns
+    # Agentic loop — keep going until we get a final text response
+    full_text = ""
+    for attempt in range(10):
         response = client.messages.create(
             model="claude-haiku-4-5",
             max_tokens=2000,
             system=SYSTEM_PROMPT,
-            tools=[{"type": "web_search_20250305", "name": "web_search"}],
+            tools=tools,
             messages=messages,
         )
 
-    # Extract text
-    full_text = "".join(b.text for b in response.content if hasattr(b, "text"))
+        print(f"  Turn {attempt+1}: stop_reason={response.stop_reason}, blocks={[b.type for b in response.content]}")
+
+        if response.stop_reason == "end_turn":
+            text_blocks = [b.text for b in response.content if hasattr(b, "text") and b.text.strip()]
+            if text_blocks:
+                full_text = text_blocks[-1].strip()
+                print(f"  Got text response ({len(full_text)} chars)")
+                break
+            else:
+                raise ValueError("end_turn but no text content in response")
+
+        elif response.stop_reason == "tool_use":
+            messages.append({"role": "assistant", "content": response.content})
+            tool_results = []
+            for block in response.content:
+                if block.type == "tool_use":
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": "Search completed successfully.",
+                    })
+            messages.append({"role": "user", "content": tool_results})
+            time.sleep(1)
+
+        else:
+            raise ValueError(f"Unexpected stop_reason: {response.stop_reason}")
+    else:
+        raise ValueError("Exceeded maximum turns without getting a final response")
 
     # Strip any accidental markdown fences
-    clean = full_text.strip()
-    if clean.startswith("```"):
-        clean = clean.split("\n", 1)[1].rsplit("```", 1)[0]
+    if full_text.startswith("```"):
+        full_text = full_text.split("\n", 1)[1].rsplit("```", 1)[0]
 
-    return json.loads(clean.strip())
+    # Find the JSON array in the response
+    start = full_text.find("[")
+    end   = full_text.rfind("]") + 1
+    if start == -1 or end == 0:
+        raise ValueError(f"No JSON array found in response: {full_text[:200]}")
+
+    return json.loads(full_text[start:end])
 
 
 # ── Write Excel ───────────────────────────────────────────────────────────────
@@ -139,11 +164,16 @@ def write_csv(rows):
         writer.writeheader()
         for row in rows:
             writer.writerow({
-                "Type": row.get("type",""), "Type2": row.get("type2",""),
-                "Title": row.get("title",""), "Description": row.get("description",""),
-                "Mile": row.get("mile",""), "Status": row.get("status",""),
-                "Date": row.get("date",""), "Last Verified": row.get("last_verified", TODAY),
-                "Source": row.get("source",""), "Lat": row.get("lat",""),
+                "Type": row.get("type",""),
+                "Type2": row.get("type2",""),
+                "Title": row.get("title",""),
+                "Description": row.get("description",""),
+                "Mile": row.get("mile",""),
+                "Status": row.get("status",""),
+                "Date": row.get("date",""),
+                "Last Verified": row.get("last_verified", TODAY),
+                "Source": row.get("source",""),
+                "Lat": row.get("lat",""),
                 "Lon": row.get("lon",""),
             })
     print(f"Saved CSV to {CSV_PATH}")
