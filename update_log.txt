@@ -1,16 +1,17 @@
 Thames Path Update Log
-Date: 2026-05-11
+Date: 2026-05-18
 Status: OK
-Rows: 11
+Rows: 12
 
-  [active] Osney Bridge diversion Oxford
+  [active] Osney Bridge access closure Oxford
   [active] Marsh Lock footbridge closure Henley
   [active] Sandford Footbridge closure
-  [active intermittent] Abingdon Weir walkway intermittent closure
-  [active] Temple Footbridge closure Marlow
-  [active] Bridge 142 closure Runnymede Egham
-  [active] Bell Weir Lock refurbishment Runnymede
+  [active] Abingdon Weir walkway closure
+  [active] Temple Footbridge closure near Marlow
+  [active] Bridge 142 closure near Runnymede M25
+  [active] Bell Weir refurbishment works
   [active] Streatley-Goring towpath diversion
   [active] Penton Hook Island closure
   [active] Ten Foot Bridge closure Faringdon
-  [active partial] Brentford Grand Union Canal disruption
+  [partial] Brentford Grand Union Canal disruption
+  [reopened] Benson Weir diversion open
